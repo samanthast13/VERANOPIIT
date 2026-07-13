@@ -17,8 +17,8 @@ EXPOSURE_MAX = 2000
 GAIN_MIN = 0.1
 GAIN_MAX = 10.0
 
-INTEGRATION_TIME_MIN = 0.5
-INTEGRATION_TIME_MAX = 300.0
+ACQUISITION_TIME_MIN = 0.5
+ACQUISITION_TIME_MAX = 300.0
 
 
 # Single persistent Tk root, reused for the port dialog and every save prompt.
@@ -84,7 +84,7 @@ ser = serial.Serial(PORT, BAUDRATE, timeout=1)
 
 current_exposure = 50
 current_gain = 1.0  # 1.0 = no amplification
-current_integration_time = 1.0  # seconds, used by Integration Capture
+current_acquisition_time = 1.0  # seconds, used by Acquisition Capture
 
 # Holds the most recent frame of 128 values seen from the live feed
 latest_frame = {"values": None}
@@ -148,14 +148,14 @@ def update_gain(text):
     update_title()
 
 
-def update_integration_time(text):
-    global current_integration_time
+def update_acquisition_time(text):
+    global current_acquisition_time
     try:
         new_value = float(text.strip())
     except ValueError:
         return
-    new_value = max(INTEGRATION_TIME_MIN, min(INTEGRATION_TIME_MAX, new_value))  # clamp to range
-    current_integration_time = new_value
+    new_value = max(ACQUISITION_TIME_MIN, min(ACQUISITION_TIME_MAX, new_value))  # clamp to range
+    current_acquisition_time = new_value
 
 
 text_box_exp.on_submit(update_exposure)
@@ -192,15 +192,15 @@ def save_snapshot(values, exposure, gain):
     print(f"Capture saved to: {filepath}")
 
 
-def save_integration_csv(columns, data, exposure, gain, total_time, tick_seconds):
+def save_acquisition_csv(columns, data, exposure, gain, total_time, tick_seconds):
     """Save a CSV with Pixel (1-128) as rows and one column per elapsed time tick
     (one tick = the exposure value in ms, used as the reading interval) captured
-    during the integration window."""
+    during the acquisition window."""
     filepath = filedialog.asksaveasfilename(
-        title="Save integration capture",
+        title="Save acquisition capture",
         defaultextension=".csv",
         filetypes=[("CSV file", "*.csv"), ("Text file", "*.txt")],
-        initialfile=f"integration_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        initialfile=f"acquisition_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     )
 
     if not filepath:
@@ -213,7 +213,7 @@ def save_integration_csv(columns, data, exposure, gain, total_time, tick_seconds
     with open(filepath, "w", newline="") as f:
         f.write(f"# Exposure_ms: {exposure}\n")
         f.write(f"# Gain: {gain}\n")
-        f.write(f"# Integration_time_s: {total_time}\n")
+        f.write(f"# Acquisition_time_s: {total_time}\n")
         f.write(f"# Tick_ms: {int(round(tick_seconds * 1000))}\n")
         f.write(f"# Timestamp: {timestamp}\n")
 
@@ -223,7 +223,7 @@ def save_integration_csv(columns, data, exposure, gain, total_time, tick_seconds
             row = [pixel_idx + 1] + [data[col_idx][pixel_idx] for col_idx in range(len(columns))]
             writer.writerow(row)
 
-    print(f"Integration capture saved to: {filepath}")
+    print(f"Acquisition capture saved to: {filepath}")
 
 
 def show_save_prompt(values, exposure, gain):
@@ -271,42 +271,42 @@ btn_capture = plt.Button(axbox_capture, 'Capture')
 btn_capture.on_clicked(capture_snapshot)
 
 
-# --- Integration Capture: take one reading every fixed 500 ms tick until the
-# total integration time is reached, then offer to save all of them as columns
+# --- Acquisition Capture: take one reading every fixed 500 ms tick until the
+# total acquisition time is reached, then offer to save all of them as columns
 # in a single CSV (Pixel 1-128 as rows). Non-blocking: state is advanced from
 # inside the main serial-read loop below using time.time() checks. ---
-integration_state = {
+acquisition_state = {
     "active": False,
     "start_time": None,
     "tick": 0.1,  # seconds, set from current_exposure when the capture starts
     "next_tick": 0.1,
     "columns": [],
     "data": [],
-    "total_time": current_integration_time,
+    "total_time": current_acquisition_time,
 }
 
 
-def show_integration_save_prompt(columns, data, exposure, gain, total_time, tick_seconds):
-    """Same Toplevel + wait_window pattern as show_save_prompt, for integration data."""
+def show_acquisition_save_prompt(columns, data, exposure, gain, total_time, tick_seconds):
+    """Same Toplevel + wait_window pattern as show_save_prompt, for acquisition data."""
     prompt = tk.Toplevel(root)
-    prompt.title("Integration capture complete")
+    prompt.title("Acquisition capture complete")
     prompt.geometry("320x120")
     prompt.attributes("-topmost", True)
 
     tk.Label(
         prompt,
-        text=f"Integration capture complete ({total_time}s, {len(columns)} readings).\nDo you want to save it?",
+        text=f"Acquisition capture complete ({total_time}s, {len(columns)} readings).\nDo you want to save it?",
         font=("Arial", 11),
         justify="center",
     ).pack(pady=15)
 
     def on_save():
         prompt.destroy()
-        save_integration_csv(columns, data, exposure, gain, total_time, tick_seconds)
+        save_acquisition_csv(columns, data, exposure, gain, total_time, tick_seconds)
 
     def on_discard():
         prompt.destroy()
-        print("Integration capture discarded.")
+        print("Acquisition capture discarded.")
 
     btn_frame = tk.Frame(prompt)
     btn_frame.pack(pady=5)
@@ -317,29 +317,29 @@ def show_integration_save_prompt(columns, data, exposure, gain, total_time, tick
     root.wait_window(prompt)
 
 
-def start_integration_capture(event=None):
-    if integration_state["active"]:
-        print("Integration capture already running.")
+def start_acquisition_capture(event=None):
+    if acquisition_state["active"]:
+        print("Acquisition capture already running.")
         return
     tick = current_exposure / 1000.0  # exposure is in ms; tick is in seconds
-    integration_state["active"] = True
-    integration_state["start_time"] = time.time()
-    integration_state["tick"] = tick
-    integration_state["next_tick"] = tick
-    integration_state["columns"] = []
-    integration_state["data"] = []
-    integration_state["total_time"] = current_integration_time
-    print(f"Integration capture started: {current_integration_time}s, "
+    acquisition_state["active"] = True
+    acquisition_state["start_time"] = time.time()
+    acquisition_state["tick"] = tick
+    acquisition_state["next_tick"] = tick
+    acquisition_state["columns"] = []
+    acquisition_state["data"] = []
+    acquisition_state["total_time"] = current_acquisition_time
+    print(f"Acquisition capture started: {current_acquisition_time}s, "
           f"reading every {int(round(tick * 1000))}ms (= current exposure)...")
 
 
-axbox_integration_capture = plt.axes([0.32, 0.02, 0.18, 0.06])
-btn_integration_capture = plt.Button(axbox_integration_capture, 'Integration Capture')
-btn_integration_capture.on_clicked(start_integration_capture)
+axbox_acquisition_capture = plt.axes([0.32, 0.02, 0.18, 0.06])
+btn_acquisition_capture = plt.Button(axbox_acquisition_capture, 'Acquisition Capture')
+btn_acquisition_capture.on_clicked(start_acquisition_capture)
 
-axbox_integration = plt.axes([0.52, 0.025, 0.13, 0.05])
-text_box_integration = TextBox(axbox_integration, '', initial=str(current_integration_time))
-text_box_integration.on_submit(update_integration_time)
+axbox_acquisition = plt.axes([0.52, 0.025, 0.13, 0.05])
+text_box_acquisition = TextBox(axbox_acquisition, '', initial=str(current_acquisition_time))
+text_box_acquisition.on_submit(update_acquisition_time)
 
 fig.text(0.655, 0.05, 'seconds', fontsize=9, va='center')
 
@@ -368,28 +368,28 @@ try:
         line.set_ydata(values_with_gain)
         fig.canvas.draw_idle()
 
-        if integration_state["active"]:
-            elapsed = time.time() - integration_state["start_time"]
+        if acquisition_state["active"]:
+            elapsed = time.time() - acquisition_state["start_time"]
 
-            while elapsed >= integration_state["next_tick"] and integration_state["active"]:
-                integration_state["data"].append(list(values_with_gain))
-                tick_ms = int(round(integration_state["next_tick"] * 1000))
-                integration_state["columns"].append(f"{tick_ms}ms")
-                integration_state["next_tick"] += integration_state["tick"]
+            while elapsed >= acquisition_state["next_tick"] and acquisition_state["active"]:
+                acquisition_state["data"].append(list(values_with_gain))
+                tick_ms = int(round(acquisition_state["next_tick"] * 1000))
+                acquisition_state["columns"].append(f"{tick_ms}ms")
+                acquisition_state["next_tick"] += acquisition_state["tick"]
 
-            if elapsed >= integration_state["total_time"]:
-                integration_state["active"] = False
-                if integration_state["columns"]:
-                    show_integration_save_prompt(
-                        integration_state["columns"],
-                        integration_state["data"],
+            if elapsed >= acquisition_state["total_time"]:
+                acquisition_state["active"] = False
+                if acquisition_state["columns"]:
+                    show_acquisition_save_prompt(
+                        acquisition_state["columns"],
+                        acquisition_state["data"],
                         current_exposure,
                         current_gain,
-                        integration_state["total_time"],
-                        integration_state["tick"],
+                        acquisition_state["total_time"],
+                        acquisition_state["tick"],
                     )
                 else:
-                    print("Integration capture finished with no readings (total time shorter than tick).")
+                    print("Acquisition capture finished with no readings (total time shorter than tick).")
 
         plt.pause(0.001)
         root.update()  # keep the (hidden) Tk root alive and responsive for Toplevel dialogs
